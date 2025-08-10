@@ -1,0 +1,95 @@
+// Part-B Visualize JSON data in a PIE Chart using C#
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net.Http;
+using System.Text.Json;
+using System.IO;
+using System.Threading.Tasks;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
+
+class Program
+{
+    public class TimeEntry
+    {
+        public string EmployeeName { get; set; }
+        public DateTime StarTimeUtc { get; set; }
+        public DateTime EndTimeUtc { get; set; }
+    }
+
+    static async Task Main()
+    {
+        const string apiUrl = "https://rc-vault-fap-live-1.azurewebsites.net/api/gettimeentries?code=v017RnE8vuzXzPJo5eaLLjXjmRW07law99QTD90zat9FfOQJKKUcgQ==";
+
+        using var client = new HttpClient();
+        var json = await client.GetStringAsync(apiUrl);
+        var entries = JsonSerializer.Deserialize<List<TimeEntry>>(json);
+
+        var employeeHours = entries
+            .Where(e => !string.IsNullOrEmpty(e.EmployeeName))
+            .GroupBy(e => e.EmployeeName)
+            .Select(g => new {
+                Name = g.Key,
+                TotalHours = g.Sum(e => (e.EndTimeUtc - e.StarTimeUtc).TotalHours)
+            })
+            .Where(e => e.TotalHours > 0)  
+            .ToList();
+
+        double totalAllHours = employeeHours.Sum(e => e.TotalHours);
+
+        using var bitmap = new Bitmap(800, 600);
+        using var graphics = Graphics.FromImage(bitmap);
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        graphics.Clear(Color.White);
+
+        var rect = new Rectangle(50, 50, 500, 500);
+        float startAngle = 0;
+        var colors = new List<Color> { 
+            Color.Red, Color.Blue, Color.Green, Color.Orange, Color.Purple,
+            Color.Cyan, Color.Magenta, Color.Yellow, Color.Lime, Color.Teal 
+        };
+        int colorIndex = 0;
+
+
+        foreach (var employee in employeeHours)
+        {
+            float sweepAngle = (float)(employee.TotalHours / totalAllHours * 360);
+            using var brush = new SolidBrush(colors[colorIndex % colors.Count]);
+            graphics.FillPie(brush, rect, startAngle, sweepAngle);
+            startAngle += sweepAngle;
+            colorIndex++;
+        }
+
+
+        startAngle = 0;
+        colorIndex = 0;
+        var font = new Font("Arial", 10);
+        for (int i = 0; i < employeeHours.Count; i++)
+        {
+            var employee = employeeHours[i];
+            float percentage = (float)(employee.TotalHours / totalAllHours * 100);
+            float sweepAngle = (float)(employee.TotalHours / totalAllHours * 360);
+            float midAngle = startAngle + sweepAngle / 2;
+
+            // Legend position
+            graphics.FillRectangle(
+                new SolidBrush(colors[colorIndex % colors.Count]), 
+                580, 100 + i * 25, 20, 20
+            );
+            graphics.DrawString(
+                $"{employee.Name} ({percentage:F1}%)", 
+                font, Brushes.Black, 
+                610, 100 + i * 25
+            );
+
+            startAngle += sweepAngle;
+            colorIndex++;
+        }
+
+        bitmap.Save("chart.png", ImageFormat.Png);
+        Console.WriteLine("Chart saved: chart.png");
+    }
+}
